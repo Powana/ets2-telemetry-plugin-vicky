@@ -28,8 +28,11 @@
 #include "eurotrucks2/scssdk_telemetry_eut2.h"
 #include "amtrucks/scssdk_ats.h"
 #include "amtrucks/scssdk_telemetry_ats.h"
+#include <exception>
 
 #define UNUSED(x)
+
+HANDLE serialHandle;
 
 /**
  * @brief Logging support.
@@ -45,33 +48,8 @@ bool output_paused = true;
  * @brief Should we print the data header next time
  * we are printing the data?
  */
-bool print_header = true;
+bool print_header = false;
 
-/**
- * @brief Last timestamp we received.
- */
-scs_timestamp_t last_timestamp = static_cast<scs_timestamp_t>(-1);
-
-/**
- * @brief Combined telemetry data.
- */
-struct telemetry_state_t
-{
-	scs_timestamp_t timestamp;
-	scs_timestamp_t raw_rendering_timestamp;
-	scs_timestamp_t raw_simulation_timestamp;
-	scs_timestamp_t raw_paused_simulation_timestamp;
-
-	bool	orientation_available;
-	float	heading;
-	float	pitch;
-	float	roll;
-
-	float	speed;
-	float	rpm;
-	int	gear;
-
-} telemetry;
 
 /**
  * @brief Function writting message to the game internal log.
@@ -85,7 +63,7 @@ bool init_log(void)
 	if (log_file) {
 		return true;
 	}
-	log_file = fopen("telemetry.log", "wt");
+	fopen_s(&log_file, "telemetry_ben.log", "wt");
 	if (!log_file) {
 		return false;
 	}
@@ -126,254 +104,85 @@ void log_line(const char* const text, ...)
 	va_end(args);
 }
 
-// Handling of individual events.
+/// <summary>
+/// Pin mappings for arduino
+/// </summary>
+char p_front_lblinker  = 8;
+char p_front_rblinker  = 9;
+char p_back_rblinker   = 2;
+char p_back_lblinker   = 3;
+char p_lblinkers[] = { p_front_lblinker, p_back_lblinker, '\0' };
+char p_rblinkers[] = { p_front_rblinker, p_back_rblinker, '\0' };
 
-SCSAPI_VOID telemetry_frame_start(const scs_event_t UNUSED(event), const void* const event_info, const scs_context_t UNUSED(context))
-{
-	const struct scs_telemetry_frame_start_t* const info = static_cast<const scs_telemetry_frame_start_t*>(event_info);
+char p_low_beam[] = { 10, '\0' };
+char p_high_beam[] = { 11, '\0' };
 
-	// The following processing of the timestamps is done so the output
-	// from this plugin has continuous time, it is not necessary otherwise.
+char p_front_daytime_running = 12;
+char p_back_daytime_running = 5;
+char p_daytime_running[] = { p_front_daytime_running, p_back_daytime_running, '\0' };
 
-	// When we just initialized itself, assume that the time started
-	// just now.
+char p_parking[] = { 99, '\0' };
+char p_brake[] = { 7, '\0' };
+char p_reverse[] = { 4, '\0'};
 
-	if (last_timestamp == static_cast<scs_timestamp_t>(-1)) {
-		last_timestamp = info->paused_simulation_time;
+
+
+bool arduino_init(const char* port_name="\\\\.\\COM3") {
+	try {
+		serialHandle = CreateFileA(port_name, GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+
+		// Do some basic settings
+		DCB serialParams = { 0 };
+		serialParams.DCBlength = sizeof(serialParams);
+
+		GetCommState(serialHandle, &serialParams);
+		serialParams.BaudRate = 9600;
+		serialParams.ByteSize = 8;
+		serialParams.StopBits = TWOSTOPBITS;
+		serialParams.Parity = NOPARITY;
+		SetCommState(serialHandle, &serialParams);
+
+		// Set timeouts
+		COMMTIMEOUTS timeout = { 0 };
+		timeout.WriteTotalTimeoutConstant = 50;
+		timeout.WriteTotalTimeoutMultiplier = 10;
+
+		SetCommTimeouts(serialHandle, &timeout);
+
+		return 0;
+	}
+	catch (std::exception& e) {
+		log_line("Arduino init exception:");
+		log_line(e.what());
+		return 1;
 	}
 
-	// The timer might be sometimes restarted (e.g. after load) while
-	// we want to provide continuous time on our output.
-
-	if (info->flags & SCS_TELEMETRY_FRAME_START_FLAG_timer_restart) {
-		last_timestamp = 0;
-	}
-
-	// Advance the timestamp by delta since last frame.
-
-	telemetry.timestamp += (info->paused_simulation_time - last_timestamp);
-	last_timestamp = info->paused_simulation_time;
-
-	// The raw values.
-
-	telemetry.raw_rendering_timestamp = info->render_time;
-	telemetry.raw_simulation_timestamp = info->simulation_time;
-	telemetry.raw_paused_simulation_timestamp = info->paused_simulation_time;
 }
 
-SCSAPI_VOID telemetry_frame_end(const scs_event_t UNUSED(event), const void* const UNUSED(event_info), const scs_context_t UNUSED(context))
-{
-	if (output_paused) {
-		return;
-	}
-
-	// The header.
-
-	if (print_header) {
-		print_header = false;
-		log_line("timestamp[us];raw rendering timestamp[us];raw simulation timestamp[us];raw paused simulation timestamp[us];heading[deg];pitch[deg];roll[deg];speed[m/s];rpm;gear");
-	}
-
-	// The data line.
-
-	log_print("%" SCS_PF_U64 ";%" SCS_PF_U64 ";%" SCS_PF_U64 ";%" SCS_PF_U64, telemetry.timestamp, telemetry.raw_rendering_timestamp, telemetry.raw_simulation_timestamp, telemetry.raw_paused_simulation_timestamp);
-	if (telemetry.orientation_available) {
-		log_print(";%f;%f;%f", telemetry.heading, telemetry.pitch, telemetry.roll);
-	}
-	else {
-		log_print(";---;---;---");
-	}
-	log_line(
-		";%f;%f;%d",
-		telemetry.speed,
-		telemetry.rpm,
-		telemetry.gear
-	);
-}
-
-SCSAPI_VOID telemetry_pause(const scs_event_t event, const void* const UNUSED(event_info), const scs_context_t UNUSED(context))
-{
-	output_paused = (event == SCS_TELEMETRY_EVENT_paused);
-	if (output_paused) {
-		log_line("Telemetry paused");
-	}
-	else {
-		log_line("Telemetry unpaused");
-	}
-	print_header = true;
-}
-
-void telemetry_print_attributes(const scs_named_value_t* const attributes)
-{
-	for (const scs_named_value_t* current = attributes; current->name; ++current) {
-		log_print("  %s", current->name);
-		if (current->index != SCS_U32_NIL) {
-			log_print("[%u]", static_cast<unsigned>(current->index));
-		}
-		log_print(" : ");
-		switch (current->value.type) {
-		case SCS_VALUE_TYPE_INVALID: {
-			log_line("none");
-			break;
-		}
-		case SCS_VALUE_TYPE_bool: {
-			log_line("bool = %s", current->value.value_bool.value ? "true" : "false");
-			break;
-		}
-		case SCS_VALUE_TYPE_s32: {
-			log_line("s32 = %d", static_cast<int>(current->value.value_s32.value));
-			break;
-		}
-		case SCS_VALUE_TYPE_u32: {
-			log_line("u32 = %u", static_cast<unsigned>(current->value.value_u32.value));
-			break;
-		}
-		case SCS_VALUE_TYPE_s64: {
-			log_line("s64 = %" SCS_PF_S64, current->value.value_s64.value);
-			break;
-		}
-		case SCS_VALUE_TYPE_u64: {
-			log_line("u64 = %" SCS_PF_U64, current->value.value_u64.value);
-			break;
-		}
-		case SCS_VALUE_TYPE_float: {
-			log_line("float = %f", current->value.value_float.value);
-			break;
-		}
-		case SCS_VALUE_TYPE_double: {
-			log_line("double = %f", current->value.value_double.value);
-			break;
-		}
-		case SCS_VALUE_TYPE_fvector: {
-			log_line(
-				"fvector = (%f,%f,%f)",
-				current->value.value_fvector.x,
-				current->value.value_fvector.y,
-				current->value.value_fvector.z
-			);
-			break;
-		}
-		case SCS_VALUE_TYPE_dvector: {
-			log_line(
-				"dvector = (%f,%f,%f)",
-				current->value.value_dvector.x,
-				current->value.value_dvector.y,
-				current->value.value_dvector.z
-			);
-			break;
-		}
-		case SCS_VALUE_TYPE_euler: {
-			log_line(
-				"euler = h:%f p:%f r:%f",
-				current->value.value_euler.heading * 360.0f,
-				current->value.value_euler.pitch * 360.0f,
-				current->value.value_euler.roll * 360.0f
-			);
-			break;
-		}
-		case SCS_VALUE_TYPE_fplacement: {
-			log_line(
-				"fplacement = (%f,%f,%f) h:%f p:%f r:%f",
-				current->value.value_fplacement.position.x,
-				current->value.value_fplacement.position.y,
-				current->value.value_fplacement.position.z,
-				current->value.value_fplacement.orientation.heading * 360.0f,
-				current->value.value_fplacement.orientation.pitch * 360.0f,
-				current->value.value_fplacement.orientation.roll * 360.0f
-			);
-			break;
-		}
-		case SCS_VALUE_TYPE_dplacement: {
-			log_line(
-				"dplacement = (%f,%f,%f) h:%f p:%f r:%f",
-				current->value.value_dplacement.position.x,
-				current->value.value_dplacement.position.y,
-				current->value.value_dplacement.position.z,
-				current->value.value_dplacement.orientation.heading * 360.0f,
-				current->value.value_dplacement.orientation.pitch * 360.0f,
-				current->value.value_dplacement.orientation.roll * 360.0f
-			);
-			break;
-		}
-		case SCS_VALUE_TYPE_string: {
-			log_line("string = %s", current->value.value_string.value);
-			break;
-		}
-		default: {
-			log_line("unknown");
-			break;
-		}
-		}
-	}
-}
-
-SCSAPI_VOID telemetry_configuration(const scs_event_t event, const void* const event_info, const scs_context_t UNUSED(context))
-{
-	// Here we just print the configuration info.
-
-	const struct scs_telemetry_configuration_t* const info = static_cast<const scs_telemetry_configuration_t*>(event_info);
-	log_line("Configuration: %s", info->id);
-
-	telemetry_print_attributes(info->attributes);
-
-	print_header = true;
-}
-
-SCSAPI_VOID telemetry_gameplay_event(const scs_event_t event, const void* const event_info, const scs_context_t UNUSED(context))
-{
-	// Here we just print the event info.
-
-	const struct scs_telemetry_gameplay_event_t* const info = static_cast<const scs_telemetry_gameplay_event_t*>(event_info);
-	log_line("Gameplay event: %s", info->id);
-
-	telemetry_print_attributes(info->attributes);
-
-	print_header = true;
+void arduino_write_pin(char pins[], char val) {
+	int i = 0;
+	do {
+		WriteFile(serialHandle, &pins[i], 1, NULL, NULL);
+		WriteFile(serialHandle, &val, 1, NULL, NULL);
+		WriteFile(serialHandle, ";", 1, NULL, NULL);
+		i++;
+	} while (pins[i] != '\0');
+	
 }
 
 // Handling of individual channels.
 
-SCSAPI_VOID telemetry_store_orientation(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
+SCSAPI_VOID telemetry_light_handler(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
 {
-	assert(context);
-	telemetry_state_t* const state = static_cast<telemetry_state_t*>(context);
-
-	// This callback was registered with the SCS_TELEMETRY_CHANNEL_FLAG_no_value flag
-	// so it is called even when the value is not available.
-
-	if (!value) {
-		state->orientation_available = false;
-		return;
-	}
 
 	assert(value);
-	assert(value->type == SCS_VALUE_TYPE_euler);
-	state->orientation_available = true;
-	state->heading = value->value_euler.heading * 360.0f;
-	state->pitch = value->value_euler.pitch * 360.0f;
-	state->roll = value->value_euler.roll * 360.0f;
-}
-
-SCSAPI_VOID telemetry_store_float(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
-{
-	// The SCS_TELEMETRY_CHANNEL_FLAG_no_value flag was not provided during registration
-	// so this callback is only called when a valid value is available.
-
-	assert(value);
-	assert(value->type == SCS_VALUE_TYPE_float);
+	assert(value->type == SCS_VALUE_TYPE_bool);
 	assert(context);
-	*static_cast<float*>(context) = value->value_float.value;
-}
 
-SCSAPI_VOID telemetry_store_s32(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
-{
-	// The SCS_TELEMETRY_CHANNEL_FLAG_no_value flag was not provided during registration
-	// so this callback is only called when a valid value is available.
+	// Match game behaviour with high-beams
 
-	assert(value);
-	assert(value->type == SCS_VALUE_TYPE_s32);
-	assert(context);
-	*static_cast<int*>(context) = value->value_s32.value;
+
+	arduino_write_pin((char *)context, value->value_bool.value);
 }
 
 /**
@@ -439,54 +248,31 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version, const scs_telemetry_in
 		log_line("WARNING: Unsupported game, some features or values might behave incorrectly");
 	}
 
-	// Register for events. Note that failure to register those basic events
-	// likely indicates invalid usage of the api or some critical problem. As the
-	// example requires all of them, we can not continue if the registration fails.
+	// Set up serial communication with Arduino unit.
 
-	const bool events_registered =
-		(version_params->register_for_event(SCS_TELEMETRY_EVENT_frame_start, telemetry_frame_start, NULL) == SCS_RESULT_ok) &&
-		(version_params->register_for_event(SCS_TELEMETRY_EVENT_frame_end, telemetry_frame_end, NULL) == SCS_RESULT_ok) &&
-		(version_params->register_for_event(SCS_TELEMETRY_EVENT_paused, telemetry_pause, NULL) == SCS_RESULT_ok) &&
-		(version_params->register_for_event(SCS_TELEMETRY_EVENT_started, telemetry_pause, NULL) == SCS_RESULT_ok)
-		;
-	if (!events_registered) {
-
-		// Registrations created by unsuccessfull initialization are
-		// cleared automatically so we can simply exit.
-
-		version_params->common.log(SCS_LOG_TYPE_error, "Unable to register event callbacks");
+	if (arduino_init()) { // TODO: ADD (Make sure arduino is connect to port # ) when port # is known
+		version_params->common.log(SCS_LOG_TYPE_error, "Unable to connect to arduino");
 		return SCS_RESULT_generic_error;
 	}
 
-	// Register for the configuration info. As this example only prints the retrieved
-	// data, it can operate even if that fails.
-
-	version_params->register_for_event(SCS_TELEMETRY_EVENT_configuration, telemetry_configuration, NULL);
-
-	// Register for gameplay events.
-
-	version_params->register_for_event(SCS_TELEMETRY_EVENT_gameplay, telemetry_gameplay_event, NULL);
-
 	// Register for channels. The channel might be missing if the game does not support
 	// it (SCS_RESULT_not_found) or if does not support the requested type
-	// (SCS_RESULT_unsupported_type). For purpose of this example we ignore the failues
-	// so the unsupported channels will remain at theirs default value.
+	// (SCS_RESULT_unsupported_type).
 
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_world_placement, SCS_U32_NIL, SCS_VALUE_TYPE_euler, SCS_TELEMETRY_CHANNEL_FLAG_no_value, telemetry_store_orientation, &telemetry);
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_speed, SCS_U32_NIL, SCS_VALUE_TYPE_float, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_store_float, &telemetry.speed);
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_rpm, SCS_U32_NIL, SCS_VALUE_TYPE_float, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_store_float, &telemetry.rpm);
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_gear, SCS_U32_NIL, SCS_VALUE_TYPE_s32, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_store_s32, &telemetry.gear);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_rblinker,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_rblinkers);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_lblinker,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_lblinkers);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_low_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_low_beam);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_high_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_high_beam);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_daytime_running);
+	// version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_back_daytime_running);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_parking,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_parking);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_brake,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_brake);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_reverse,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_reverse);
 
 	// Remember the function we will use for logging.
 
 	game_log = version_params->common.log;
-	game_log(SCS_LOG_TYPE_message, "Initializing telemetry log example");
-
-	// Set the structure with defaults.
-
-	memset(&telemetry, 0, sizeof(telemetry));
-	print_header = true;
-	last_timestamp = static_cast<scs_timestamp_t>(-1);
+	game_log(SCS_LOG_TYPE_message, "Initializing telemetry plugin - vicky");
 
 	// Initially the game is paused.
 
@@ -503,7 +289,7 @@ SCSAPI_VOID scs_telemetry_shutdown(void)
 {
 	// Any cleanup needed. The registrations will be removed automatically
 	// so there is no need to do that manually.
-
+	CloseHandle(serialHandle);
 	game_log = NULL;
 	finish_log();
 }
@@ -519,6 +305,7 @@ BOOL APIENTRY DllMain(
 {
 	if (reason_for_call == DLL_PROCESS_DETACH) {
 		finish_log();
+		CloseHandle(serialHandle);
 	}
 	return TRUE;
 }
