@@ -107,23 +107,26 @@ void log_line(const char* const text, ...)
 /// <summary>
 /// Pin mappings for arduino
 /// </summary>
-char p_front_lblinker  = 8;
-char p_front_rblinker  = 9;
-char p_back_rblinker   = 2;
-char p_back_lblinker   = 3;
+char p_front_lblinker  = 13;
+char p_front_rblinker  = 12;
+char p_back_lblinker   = 7;
+char p_back_rblinker   = 6;
 char p_lblinkers[] = { p_front_lblinker, p_back_lblinker, '\0' };
 char p_rblinkers[] = { p_front_rblinker, p_back_rblinker, '\0' };
 
 char p_low_beam[] = { 10, '\0' };
-char p_high_beam[] = { 11, '\0' };
+char p_high_beam[] = { 9, '\0' };
+char p_pos_light[] = { 8, '\0' };
 
-char p_front_daytime_running = 12;
+char p_front_daytime_running = 11;
 char p_back_daytime_running = 5;
 char p_daytime_running[] = { p_front_daytime_running, p_back_daytime_running, '\0' };
 
-char p_parking[] = { 99, '\0' };
-char p_brake[] = { 7, '\0' };
-char p_reverse[] = { 4, '\0'};
+char p_parking[] = { 99, '\0' }; // There is no parking light
+char p_brake[]   = { 4, '\0' };
+char p_reverse[] = { 2, '\0'};
+
+char p_back_edge_lamp[] = { 3, '\0' };
 
 
 
@@ -250,8 +253,8 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version, const scs_telemetry_in
 
 	// Set up serial communication with Arduino unit.
 
-	if (arduino_init()) { // TODO: ADD (Make sure arduino is connect to port # ) when port # is known
-		version_params->common.log(SCS_LOG_TYPE_error, "Unable to connect to arduino");
+	if (arduino_init()) {
+		version_params->common.log(SCS_LOG_TYPE_error, "Unable to connect to arduino, make sure it is connected to COM3");
 		return SCS_RESULT_generic_error;
 	}
 
@@ -264,8 +267,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version, const scs_telemetry_in
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_low_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_low_beam);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_high_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_high_beam);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_daytime_running);
-	// version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_back_daytime_running);
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_parking,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_parking);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_parking,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_back_edge_lamp);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_brake,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_brake);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_reverse,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_reverse);
 
