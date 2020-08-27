@@ -104,6 +104,13 @@ void log_line(const char* const text, ...)
 	va_end(args);
 }
 
+struct telemetry_t {
+	bool electric_enabled = 0; // Used to check if lights should be turned on
+	bool high_beam_enabled = 0; // Used to check if high beam should be turned on
+	bool low_beam_enabled = 0; // Used to check if high beam should be turned on
+} telemetry;
+bool electric_enabled = true;
+
 /// <summary>
 /// Pin mappings for arduino
 /// </summary>
@@ -128,6 +135,7 @@ char p_reverse[] = { 2, '\0'};
 
 char p_back_edge_lamp[] = { 3, '\0' };
 
+bool val;
 
 
 bool arduino_init(const char* port_name="\\\\.\\COM3") {
@@ -165,6 +173,7 @@ bool arduino_init(const char* port_name="\\\\.\\COM3") {
 void arduino_write_pin(char pins[], char val) {
 	int i = 0;
 	do {
+		val = (val == 0) ? 0 : 1;  // Make sure its 'zero or one', not 'zero or not zero'
 		WriteFile(serialHandle, &pins[i], 1, NULL, NULL);
 		WriteFile(serialHandle, &val, 1, NULL, NULL);
 		WriteFile(serialHandle, ";", 1, NULL, NULL);
@@ -173,19 +182,80 @@ void arduino_write_pin(char pins[], char val) {
 	
 }
 
+
 // Handling of individual channels.
 
 SCSAPI_VOID telemetry_light_handler(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
 {
+	assert(value);
+	assert(value->type == SCS_VALUE_TYPE_bool);
+	assert(context);
+	val = value->value_bool.value;
+	game_log(SCS_LOG_TYPE_message, "Light handler called.");
+	// Match game behaviour, make sure electric is on before turning on the light
 
+	game_log(SCS_LOG_TYPE_message, "IF block with val:");
+	game_log(SCS_LOG_TYPE_message, val ? "1" : "0");
+
+	// Only turn on high beam if low beam is also on
+	if (context == &p_high_beam) {
+		telemetry.high_beam_enabled = val;
+		if (val && telemetry.electric_enabled && telemetry.low_beam_enabled) {
+			arduino_write_pin((char*)context, val);
+		}
+		else if (!val) {
+			arduino_write_pin((char*)context, val);
+		}
+	}
+
+	// Low beam specific logic
+	else if (context == &p_low_beam) {
+		telemetry.low_beam_enabled = val;
+		if (val && telemetry.electric_enabled) {
+			// Turn on high beam if it was enabled but not on due to light mode (Don't think this is how it works in real life)
+			if (telemetry.high_beam_enabled) {
+				arduino_write_pin((char*)(scs_context_t) &p_high_beam, 1);
+			}
+			arduino_write_pin((char*)context, val);
+		}
+
+		// Turn off high beam when turning off low beam
+		else if (!val) {
+			arduino_write_pin((char*)(scs_context_t)&p_high_beam, 0);
+			arduino_write_pin((char*)context, val);
+		}
+	}
+	
+	// Electric must be enabled to turn on lights
+	else if (val && telemetry.electric_enabled) {
+		game_log(SCS_LOG_TYPE_message, "ELSE block with val:");
+		game_log(SCS_LOG_TYPE_message, val ? "1" : "0");
+
+		arduino_write_pin((char*)context, val);
+	}
+
+	else if (!val) {
+		arduino_write_pin((char*)context, val);
+	}
+}
+
+SCSAPI_VOID telemetry_electric_handler(const scs_string_t name, const scs_u32_t index, const scs_value_t* const value, const scs_context_t context)
+{
 	assert(value);
 	assert(value->type == SCS_VALUE_TYPE_bool);
 	assert(context);
 
-	// Match game behaviour with high-beams
+	// Light daytime running lights
+	telemetry.electric_enabled = value->value_bool.value;
+	telemetry_light_handler(name, index, value, context);
 
-
-	arduino_write_pin((char *)context, value->value_bool.value);
+	// Match ingame light behaviour, turn off lights when electricity is turned off
+	if (!value->value_bool.value) {
+		arduino_write_pin((char*)(scs_context_t)&p_low_beam, 0);
+		arduino_write_pin((char*)(scs_context_t)&p_high_beam, 0);
+	}
+	game_log(SCS_LOG_TYPE_message, "Electric enabled:");
+	game_log(SCS_LOG_TYPE_message, (value->value_bool.value) ? "1" : "0");
 }
 
 /**
@@ -266,7 +336,7 @@ SCSAPI_RESULT scs_telemetry_init(const scs_u32_t version, const scs_telemetry_in
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_lblinker,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_lblinkers);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_low_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_low_beam);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_high_beam,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_high_beam);
-	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_engine_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_daytime_running);
+	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_electric_enabled,	SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_electric_handler, &p_daytime_running);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_parking,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_back_edge_lamp);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_brake,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_brake);
 	version_params->register_for_channel(SCS_TELEMETRY_TRUCK_CHANNEL_light_reverse,		SCS_U32_NIL, SCS_VALUE_TYPE_bool, SCS_TELEMETRY_CHANNEL_FLAG_none, telemetry_light_handler, &p_reverse);
@@ -291,6 +361,17 @@ SCSAPI_VOID scs_telemetry_shutdown(void)
 {
 	// Any cleanup needed. The registrations will be removed automatically
 	// so there is no need to do that manually.
+
+	// Turn off all lamps in case of game crash or something similair
+	arduino_write_pin((char*)&p_rblinkers, 0);
+	arduino_write_pin((char*)&p_lblinkers, 0);
+	arduino_write_pin((char*)&p_daytime_running, 0);
+	arduino_write_pin((char*)&p_low_beam, 0);
+	arduino_write_pin((char*)&p_high_beam, 0);
+	arduino_write_pin((char*)&p_brake, 0);
+	arduino_write_pin((char*)&p_reverse, 0);
+	arduino_write_pin((char*)&p_parking, 0);
+
 	CloseHandle(serialHandle);
 	game_log = NULL;
 	finish_log();
@@ -306,8 +387,7 @@ BOOL APIENTRY DllMain(
 )
 {
 	if (reason_for_call == DLL_PROCESS_DETACH) {
-		finish_log();
-		CloseHandle(serialHandle);
+		scs_telemetry_shutdown();
 	}
 	return TRUE;
 }
