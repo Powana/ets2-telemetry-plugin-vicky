@@ -23,11 +23,11 @@
 
 // SDK
 
-#include "scssdk_telemetry.h"
-#include "eurotrucks2/scssdk_eut2.h"
-#include "eurotrucks2/scssdk_telemetry_eut2.h"
-#include "amtrucks/scssdk_ats.h"
-#include "amtrucks/scssdk_telemetry_ats.h"
+#include "include/scssdk_telemetry.h"
+#include "include/eurotrucks2/scssdk_eut2.h"
+#include "include/eurotrucks2/scssdk_telemetry_eut2.h"
+#include "include/amtrucks/scssdk_ats.h"
+#include "include/amtrucks/scssdk_telemetry_ats.h"
 #include <exception>
 
 #define UNUSED(x)
