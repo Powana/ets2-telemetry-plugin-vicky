@@ -1,8 +1,0 @@
-﻿  pch.cpp
-  dllmain.cpp
-C:\REPOS\ets2-telemetry-plugin-vicky\ets2-telem-vicky\ets2-telem-vicky\dllmain.cpp(13,1): warning C4005: 'WINVER': macro redefinition
-C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\shared\sdkddkver.h(238): message : see previous definition of 'WINVER'
-C:\REPOS\ets2-telemetry-plugin-vicky\ets2-telem-vicky\ets2-telem-vicky\dllmain.cpp(14,1): warning C4005: '_WIN32_WINNT': macro redefinition
-C:\Program Files (x86)\Windows Kits\10\Include\10.0.18362.0\shared\sdkddkver.h(217): message : see previous definition of '_WIN32_WINNT'
-C:\REPOS\ets2-telemetry-plugin-vicky\ets2-telem-vicky\ets2-telem-vicky\dllmain.cpp(165,33): warning C4302: 'type cast': truncation from 'const scs_context_t' to 'char'
-  ets2-telem-vicky.vcxproj -> C:\REPOS\ets2-telemetry-plugin-vicky\ets2-telem-vicky\Debug\ets2-telem-vicky.dll

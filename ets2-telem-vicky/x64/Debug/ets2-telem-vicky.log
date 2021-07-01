@@ -1,0 +1,9 @@
+﻿  pch.cpp
+  dllmain.cpp
+c:\users\a355437\git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\ets2-telem-vicky\dllmain.cpp(13): warning C4005: 'WINVER': macro redefinition
+  c:\program files (x86)\windows kits\10\include\10.0.17763.0\shared\sdkddkver.h(237): note: see previous definition of 'WINVER'
+c:\users\a355437\git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\ets2-telem-vicky\dllmain.cpp(14): warning C4005: '_WIN32_WINNT': macro redefinition
+  c:\program files (x86)\windows kits\10\include\10.0.17763.0\shared\sdkddkver.h(216): note: see previous definition of '_WIN32_WINNT'
+     Creating library C:\Users\A355437\Git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\\x64\Debug\ets2-telem-vicky.lib and object C:\Users\A355437\Git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\\x64\Debug\ets2-telem-vicky.exp
+ets2-telem-vicky.exp : warning LNK4070: /OUT:telemetry.dll directive in .EXP differs from output filename 'C:\Users\A355437\Git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\\x64\Debug\ets2-telem-vicky.dll'; ignoring directive
+  ets2-telem-vicky.vcxproj -> C:\Users\A355437\Git\ets2-telemetry-plugin-vicky\ets2-telem-vicky\\x64\Debug\ets2-telem-vicky.dll
